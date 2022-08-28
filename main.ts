@@ -1,116 +1,247 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {App, DataAdapter, normalizePath, Plugin, PluginSettingTab, Setting} from 'obsidian';
+import * as path from "path";
 
-// Remember to rename these classes and interfaces!
+import {RaindropCollection} from "./raindrop/GetCollectionsApiResponse";
+import {RaindropItm} from "./raindrop/GetRaindropsApiResponse";
+import * as ejs from "ejs";
+import {EsJsTemplates} from "./note";
+import {format, parseISO} from "date-fns";
 
-interface MyPluginSettings {
-	mySetting: string;
+const {
+	setAuthToken,
+	collections,
+	raindrops,
+	moveRaindropsToCollection,
+	createCollection
+} = require("raindrop/RaindropIoApiClient");
+
+const truncate = (str: string, len: number) => str.slice?.(0, len);
+
+interface RaindropIntegrationPluginSettings {
+	frequencyMinutes: string;
+	obsidianArticleFolder: string;
+	raindropAuthToken: string;
+	raindropCollectionNameIn: string;
+	raindropCollectionNameOut: string;
+	isSyncing: boolean;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: RaindropIntegrationPluginSettings = {
+	frequencyMinutes: "30",
+	obsidianArticleFolder: "articles/YYYY/MM/DD",
+	raindropAuthToken: "",
+	raindropCollectionNameIn: "obsidian",
+	raindropCollectionNameOut: "raindrop",
+	isSyncing: false
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+const dateTimeFormat = 'dd.MM.yyyy HH:mm';
+
+export default class RaindropIntegrationPlugin extends Plugin {
+	settings: RaindropIntegrationPluginSettings;
+	scheduleInterval: null | number = null;
 
 	async onload() {
-		await this.loadSettings();
+		await this.setupPlugin();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		// always run flow on startup
+		await this.runFlow();
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+		// set scheduled run
+		await this.scheduleFlowRuns()
+	}
 
-		// This adds a simple command that can be triggered anywhere
+	private async setupPlugin() {
+		this.addSettingTab(new RaindropIntegrationSettingTab(this.app, this));
+
+		await this.initialLoadSettings();
+
+		this.registerSyncCommand();
+
+		await this.isSyncing(false);
+	}
+
+	async initialLoadSettings() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		setAuthToken(this.settings.raindropAuthToken);
+	}
+
+	private registerSyncCommand() {
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
+			id: 'raindrop-integration-sync',
+			name: 'Sync highlights',
 			callback: () => {
-				new SampleModal(this.app).open();
+				this.runFlow();
 			}
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+	}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+	async scheduleFlowRuns() {
+		if (this.scheduleInterval != null) {
+			window.clearInterval(this.scheduleInterval);
+		}
+		this.scheduleInterval = null;
+
+		const minutes = parseInt(this.settings.frequencyMinutes);
+		let milliseconds = minutes * 60 * 1000;
+		if (!milliseconds) {
+			// manual sync option
+			return;
+		}
+
+		this.scheduleInterval = window.setInterval(() => this.runFlow(), milliseconds);
+		this.registerInterval(this.scheduleInterval);
+		console.log(`Import  scheduled every ${milliseconds}ms (${minutes} minutes)`)
+
+	}
+
+	public async runFlow() {
+		if (this.settings.isSyncing) {
+			console.error("Raindrop.io sync is already in progress");
+			return Promise.resolve();
+		}
+
+		const fs = this.app.vault.adapter;
+
+		try {
+			await this.isSyncing(true);
+			console.log(`${format(new Date(), dateTimeFormat)} Start importing from raindrop.io`)
+
+			const outputDirNormalizedPath = this.noteOutputDirPath(this.settings.obsidianArticleFolder)
+			await this.createIfNotExists(fs, outputDirNormalizedPath);
+
+			// fetch all existing collections
+			let existingCollections: RaindropCollection[] = await collections();
+
+			// make sure relevant obsidian folders exist
+			let updateCollections = false;
+			const relevantObsidianFolders = [this.settings.raindropCollectionNameIn, this.settings.raindropCollectionNameOut];
+			for (const reqCollName of relevantObsidianFolders) {
+				const found = existingCollections.find(existing => existing.title.toLowerCase().trim() == reqCollName.toLowerCase().trim()) ? true : false
+				if (!found) {
+					await createCollection(reqCollName)
+					updateCollections = true;
 				}
 			}
+			if (updateCollections) {
+				existingCollections = await collections();
+			}
+
+			let inputCollection = this.findCollection(this.settings.raindropCollectionNameIn, existingCollections);
+			if (!inputCollection) {
+				console.error(`No input collection with title \"${this.settings.raindropCollectionNameIn}\" found! Abort.`);
+				return Promise.resolve();
+			}
+
+			let defaultOutputCollection = this.findCollection(this.settings.raindropCollectionNameOut, existingCollections);
+			if (!defaultOutputCollection) {
+				console.error(`No output collection with title \"${this.settings.raindropCollectionNameOut}\" found! Abort.`);
+				return Promise.resolve();
+			}
+
+			// fetch actual bookmarks
+			let raindropItms: RaindropItm[] = await raindrops(inputCollection._id)
+			if (!raindropItms) {
+				console.error("No raindrop items to be processed found!");
+				return Promise.resolve();
+			}
+
+			await this.handleRaindrops(fs, outputDirNormalizedPath, raindropItms);
+
+			await moveRaindropsToCollection(inputCollection, defaultOutputCollection);
+			console.log(`${raindropItms.length} Raindrops moved from ${inputCollection.title} to ${defaultOutputCollection.title}`);
+		} catch (e) {
+			console.error(e)
+		} finally {
+			this.isSyncing(false)
+			this.saveSettings();
+		}
+	}
+
+	private async handleRaindrops(fs: DataAdapter, outputDirNormalizedPath: string, raindropItms: RaindropItm[]) {
+		for (const itm of raindropItms) {
+			itm.title = this.cleanupTitle(itm.title);
+
+			const noteFilename = truncate(itm.domain, 20) + "_" + itm._id + ".md";
+			const noteOutputFileNormalizedPath = normalizePath(outputDirNormalizedPath + path.sep + noteFilename);
+
+			await fs.write(noteOutputFileNormalizedPath, this.generateObsidianNoteContent(itm, EsJsTemplates.OBS_NOTE_TEMPLATE, undefined))
+		}
+	}
+
+	private cleanupTitle(title: string): string {
+		if (title.startsWith("Ask HN:")) {
+			title = title.substring("Ask HN:".length);
+		}
+		if (title.startsWith("Show HN:")) {
+			title = title.substring("Show HN:".length);
+		}
+		if (title.endsWith("| Hacker News")) {
+			title = title.substring(0, title.indexOf("| Hacker News"));
+		}
+
+		return title.trim();
+	}
+
+	private findCollection(collectionName: string, existingCollections: RaindropCollection[]) {
+		return existingCollections.find(e => e.title.toLowerCase().trim() == collectionName.toLowerCase().trim());
+	}
+
+	private async createIfNotExists(fs: DataAdapter, outputDirNormalizedPath: string) {
+		let outputDirPathExists = await fs.exists(outputDirNormalizedPath);
+		if (!outputDirPathExists) {
+			await fs.mkdir(outputDirNormalizedPath);
+		}
+	}
+
+	private async isSyncing(isSyncing: boolean) {
+		this.settings.isSyncing = isSyncing;
+		return this.saveSettings();
+	}
+
+	private generateObsidianNoteContent(itm: RaindropItm, template: string, screenshot?: string) {
+		let html = ejs.render(template, {
+			raindrop: itm,
+			screenshot: screenshot,
+			imported: format(new Date(), dateTimeFormat),
+			created: format(parseISO(itm.created), dateTimeFormat),
+			lastUpdate: format(parseISO(itm.lastUpdate), dateTimeFormat)
 		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		return `${html}`;
 	}
 
 	onunload() {
 
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		return this.saveData(this.settings);
 	}
+
+	noteOutputDirPath(articleFolderStructure: string) {
+		const now = new Date();
+		let str = String(articleFolderStructure);
+
+		const yyyy = "" + now.getUTCFullYear()
+		str = str.replace(/yyyy/gi, yyyy);
+
+		const mm = ("" + (now.getUTCMonth() + 1)).padStart(2, "0");
+		str = str.replace(/MM/g, mm);
+
+		const dd = ("" + now.getUTCDate()).padStart(2, "0");
+		str = str.replace(/DD/g, dd);
+
+		return normalizePath(str);
+	}
+
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+class RaindropIntegrationSettingTab extends PluginSettingTab {
+	plugin: RaindropIntegrationPlugin;
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: RaindropIntegrationPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -119,18 +250,89 @@ class SampleSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
+		containerEl.createEl('h2', {text: 'Settings'});
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName("Sync your Raindrop.io highlights with Obsidian")
+			.setDesc("On first sync, the Raindrop.io highlights plugin will create a new folder containing all your highlights")
+			.setClass('rw-setting-sync')
+			.addButton((button) => {
+				button.setCta().setTooltip("Once the sync begins, you can close this plugin page")
+					.setButtonText('Initiate Sync')
+					.onClick(async () => {
+						button.setButtonText("Syncing...");
+						await this.plugin.runFlow()
+						button.setButtonText("Initiate Sync");
+					});
+			});
+		let el = containerEl.createEl("div", {cls: "rw-info-container"});
+		containerEl.find(".rw-setting-sync > .setting-item-control ").prepend(el);
+
+		new Setting(containerEl)
+			.setName('Configure sync frequency')
+			.setDesc("Plugin will automatically sync with raindrop.io when the app is opened and at the specified interval")
+			.addDropdown(dropdown => {
+				dropdown.addOption("0", "Manual");
+				dropdown.addOption("5", "Every 5 minutes");
+				dropdown.addOption("15", "Every 15 minutes");
+				dropdown.addOption("30", "Every 30 minutes");
+				dropdown.addOption("60", "Every 1 hour");
+
+				// select the currently-saved option
+				dropdown.setValue(this.plugin.settings.frequencyMinutes);
+
+				dropdown.onChange((newValue) => {
+					// update the plugin settings
+					this.plugin.settings.frequencyMinutes = newValue;
+					this.plugin.saveSettings();
+
+					// destroy & re-create the scheduled task
+					this.plugin.scheduleFlowRuns();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Customize base folder')
+			.setDesc(`By default, the plugin will save all your highlights into a folder named ${DEFAULT_SETTINGS.obsidianArticleFolder}`)
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder(`Defaults to: ${DEFAULT_SETTINGS.obsidianArticleFolder}`)
+				.setValue(this.plugin.settings.obsidianArticleFolder)
 				.onChange(async (value) => {
-					console.log('Secret: ' + value);
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.obsidianArticleFolder = normalizePath(value || DEFAULT_SETTINGS.obsidianArticleFolder);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('raindrop.io auth token')
+			.setDesc(`Required token to perform raindrop.io sync with this plugin`)
+			.addText(text => text
+				.setPlaceholder(`${DEFAULT_SETTINGS.raindropAuthToken}`)
+				.setValue(this.plugin.settings.raindropAuthToken)
+				.onChange(async (value) => {
+					this.plugin.settings.raindropAuthToken = value || DEFAULT_SETTINGS.raindropAuthToken;
+					await this.plugin.saveSettings();
+					setAuthToken(this.plugin.settings.raindropAuthToken);
+				}));
+
+		new Setting(containerEl)
+			.setName('raindrop.io collection name to import highlights from')
+			.setDesc(`By default, the plugin import raindrop.io highlights from a collection named ${DEFAULT_SETTINGS.raindropCollectionNameIn}`)
+			.addText(text => text
+				.setPlaceholder(`Defaults to: ${DEFAULT_SETTINGS.raindropCollectionNameIn}`)
+				.setValue(this.plugin.settings.raindropCollectionNameIn)
+				.onChange(async (value) => {
+					this.plugin.settings.raindropCollectionNameIn = value || DEFAULT_SETTINGS.raindropCollectionNameIn;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('raindrop.io collection name to move processed raindrops to')
+			.setDesc(`By default, the plugin will move processed raindrops to a collection named ${DEFAULT_SETTINGS.raindropCollectionNameOut}`)
+			.addText(text => text
+				.setPlaceholder(`Defaults to: ${DEFAULT_SETTINGS.raindropCollectionNameOut}`)
+				.setValue(this.plugin.settings.raindropCollectionNameOut)
+				.onChange(async (value) => {
+					this.plugin.settings.raindropCollectionNameOut = value || DEFAULT_SETTINGS.raindropCollectionNameOut;
 					await this.plugin.saveSettings();
 				}));
 	}

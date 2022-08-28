@@ -6,3 +6,157 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.simple-container {
+	margin-bottom: 10%;
+
+	display: grid;
+	grid-template-rows: 200px;
+	grid-template-columns: 25% 75%;
+}
+
+.simple-header {
+	/* grid */
+	grid-column-start:2;
+	grid-column-end:2;
+	grid-row-start:1;
+	grid-row-end:1;
+
+	/* header like */
+	font-weight: bold;
+	font-size: xx-large;
+
+	/* center content */
+	display: flex;
+
+	/* center horizontelly */
+	justify-content: center;
+
+	/* center vertically */
+	align-items: center;
+
+	margin-left: 20px;
+}
+
+.simple-article {
+	/* center content */
+	display: flex;
+
+	/* center horizontelly */
+	justify-content: center;
+
+	/* center vertically */
+	align-items: center;
+
+	grid-column-start:1;
+	grid-column-end:1;
+	grid-row-start:1;
+	grid-row-end:1;
+}
+
+.meta-container {
+	display: grid;
+	grid-template-rows: 1fr 1fr 1fr 1fr;
+	grid-template-columns: 100px 1fr;
+	margin-bottom: 50px;
+}
+
+.container {
+	margin-top: 5%;
+	margin-bottom: 10%;
+
+	display: grid;
+	grid-template-rows: 1fr 1fr;
+	grid-template-columns: 1fr 3fr;
+}
+header {
+	/* grid */
+	grid-column-start:1;
+	grid-column-end:3;
+	grid-row-start:1;
+	grid-row-end:1;
+
+	/* header like */
+	font-weight: bold;
+	font-size: xx-large;
+
+	/* center content */
+	display: flex;
+
+	/* center horizontally */
+	/* justify-content: center; */
+
+	/* center vertically */
+	align-items: center;
+}
+article {
+	/* center content */
+	display: flex;
+
+	/* center horizontelly */
+	justify-content: center;
+
+	/* center vertically */
+	align-items: center;
+
+	grid-column-start:1;
+	grid-column-end:2;
+	grid-row-start:2;
+	grid-row-end:2;
+}
+aside {
+	grid-column-start:2;
+	grid-column-end:3;
+	grid-row-start:2;
+	grid-row-end:2;
+
+	/* center content */
+	display: flex;
+
+	/* center horizontelly */
+	justify-content: center;
+
+	/* center vertically */
+	align-items: center;
+
+	padding: 10px;
+}
+
+blockquote {
+	padding: 0.5em 10px;
+	margin: 1.5em 10px;
+	quotes: none;
+	font-family: monospace;
+	font-weight: 100;
+	margin-inline-start: auto;
+}
+
+blockquote.yellow {
+	border: 1px none #9d942a !important;
+	border-left: 4px solid #9d942a !important;
+}
+
+blockquote.blue {
+	border: 1px none #2a679d !important;
+	border-left: 4px solid #2a679d !important;
+}
+
+blockquote.red {
+	border: 1px none #9a0b2e !important;
+	border-left: 4px solid #9a0b2e !important;
+}
+
+blockquote.green {
+	border: 1px none #3b9a0b !important;
+	border-left: 4px solid #3b9a0b !important;
+}
+
+
+blockquote p {
+	display: inline;
+}
+
+.highlight-note{
+	color: #939393;
+	display: block;
+}
