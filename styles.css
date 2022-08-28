@@ -8,10 +8,10 @@ If your plugin does not need CSS, delete this file.
 */
 
 .simple-container {
-	margin-bottom: 10%;
+	margin-bottom: 5%;
 
 	display: grid;
-	grid-template-rows: 200px;
+	grid-template-rows: 220px;
 	grid-template-columns: 25% 75%;
 }
 
@@ -30,12 +30,12 @@ If your plugin does not need CSS, delete this file.
 	display: flex;
 
 	/* center horizontelly */
-	justify-content: center;
+	justify-content: left;
 
 	/* center vertically */
 	align-items: center;
 
-	margin-left: 20px;
+	margin-left: 40px;
 }
 
 .simple-article {
@@ -58,7 +58,8 @@ If your plugin does not need CSS, delete this file.
 	display: grid;
 	grid-template-rows: 1fr 1fr 1fr 1fr;
 	grid-template-columns: 100px 1fr;
-	margin-bottom: 50px;
+	margin-bottom: 25px;
+	font-size: smaller;
 }
 
 .container {
