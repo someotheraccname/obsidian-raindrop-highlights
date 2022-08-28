@@ -8,6 +8,10 @@ import {EsJsTemplates} from "./note";
 import {format, parseISO} from "date-fns";
 
 const {
+	createDirectory
+} = require("raindrop/ObsFileSystem");
+
+const {
 	setAuthToken,
 	collections,
 	raindrops,
@@ -91,7 +95,7 @@ export default class RaindropIntegrationPlugin extends Plugin {
 
 		this.scheduleInterval = window.setInterval(() => this.runFlow(), milliseconds);
 		this.registerInterval(this.scheduleInterval);
-		console.log(`Import  scheduled every ${milliseconds}ms (${minutes} minutes)`)
+		console.log(`Import scheduled every ${milliseconds}ms (${minutes} minutes)`)
 
 	}
 
@@ -190,7 +194,7 @@ export default class RaindropIntegrationPlugin extends Plugin {
 	private async createIfNotExists(fs: DataAdapter, outputDirNormalizedPath: string) {
 		let outputDirPathExists = await fs.exists(outputDirNormalizedPath);
 		if (!outputDirPathExists) {
-			await fs.mkdir(outputDirNormalizedPath);
+			await createDirectory(this.app.vault, outputDirNormalizedPath);
 		}
 	}
 
