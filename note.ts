@@ -13,7 +13,7 @@ export namespace EsJsTemplates {
 		"<div class='fm-sep'>&nbsp;</div>" +
 		"<div class='meta-container'>" +
 		"<div>source</div><div><a href='<%= raindrop.link %>'><%= raindrop.domain %></a></div>" +
-		"<div>raindrop</div><div><a href='https://app.raindrop.io/my/0/item/<%= raindrop._id %>'>link</a></div>" +
+		"<div>raindrop</div><div><a href='https://app.raindrop.io/my/0/item/<%= raindrop._id %>/cache'>link</a></div>" +
 		"<div>imported</div><div><%= imported %>h</div>" +
 		"<div>updated</div><div><%= lastUpdate %>h</div>" +
 		"<div>created</div><div><%= created %>h</div>" +
