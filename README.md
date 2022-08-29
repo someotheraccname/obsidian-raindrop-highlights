@@ -31,6 +31,11 @@ For this extension to work you need a raindrop.io access token, for this you nee
 
 #### Manual Installation
 Go to the releases and download the latest *main.js*, *manifest.json* and *styles.css* files. Create a folder called `obsidian-raindrop-highlights` inside `.obsidian/plugins` and place the files in it.
+For windows this would be `${vaultDir}\.obsidian\plugins\obsidian-raindrop-highlights`
+Restart *Obsidian* to (re-)load the plugin.
+
+#### Build
+Clone repo and run `npm i` to install dependencies. Execute `npm run dev` in order to build the release files.
 
 #### Compatibility
 This plugin has been tested on both Windows and Linux. If you find any issue on other platforms, please get in touch.
